@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "F2C37516-D0F6-4213-BCC4-877CDDFD0E12",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:lockinai.xcodeproj",
+      "identifier" : "C9B527D12DEB843400DE302C",
+      "name" : "lockinai"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:lockinai.xcodeproj",
+        "identifier" : "C9B527DE2DEB843600DE302C",
+        "name" : "lockinaiTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:lockinai.xcodeproj",
+        "identifier" : "C9B527E82DEB843600DE302C",
+        "name" : "lockinaiUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
