@@ -24,32 +24,51 @@ struct TotalActivityReport: DeviceActivityReportScene {
         formatter.zeroFormattingBehavior = .dropAll
 
         let thisDevice = await UIDevice.current.model
+        print("🔍 TotalActivityReport: Processing data for device: \(thisDevice)")
 
-        guard let deviceData = await data.first(where: { deviceData in
-            guard let deviceName = deviceData.device.name else { return false }
-            return deviceName.localizedCaseInsensitiveContains("iPhone")
-        }) else {
-            return "No iPhone data available\nDevice: \(thisDevice)"
+        var deviceData: DeviceActivityData? = nil
+        for await device in data {
+            deviceData = device
+            break
         }
+        
+        guard let deviceData = deviceData else {
+            print("❌ TotalActivityReport: No device data available")
+            return "No device data available\nDevice: \(thisDevice)"
+        }
+
+        print("✅ TotalActivityReport: Found device data")
 
         let totalActivityDuration = await deviceData.activitySegments.reduce(0) { total, segment in
             total + segment.totalActivityDuration
         }
 
-        var appNames = [String]()
-        appNames.append("\(thisDevice),Time: \(formatter.string(from: totalActivityDuration) ?? "No time data")")
+        var appData = [String]()
+        appData.append("Device:\(thisDevice)")
+        appData.append("TotalTime:\(formatter.string(from: totalActivityDuration) ?? "0m")")
 
+        var appCount = 0
         for await activitySegment in deviceData.activitySegments {
+            print("🔍 Processing activity segment")
+            
             for await category in activitySegment.categories {
+                print("🔍 Processing category")
+                
                 for await app in category.applications {
-                    let appName = app.application.localizedDisplayName ?? "Unknown App"
-                    let appTime = formatter.string(from: app.totalActivityDuration) ?? "No Time"
-                    appNames.append("\(appName),Time:\(appTime)")
+                    let bundleId = app.application.bundleIdentifier ?? "unknown.bundle.id"
+                    let appName = app.application.localizedDisplayName ?? bundleId
+                    let appTime = formatter.string(from: app.totalActivityDuration) ?? "0m"
+                    
+                    appData.append("\(bundleId)|\(appName)|\(appTime)")
+                    appCount += 1
+                    print("✅ Added app: \(appName) (\(bundleId)) - \(appTime)")
                 }
             }
         }
 
-        let result = appNames.joined(separator: "\n")
-        return result.isEmpty ? "No activity data found" : result
+        print("📊 TotalActivityReport: Processed \(appCount) apps total")
+        let result = appData.joined(separator: "\n")
+        print("🔍 TotalActivityReport: Final result: \(result)")
+        return result.isEmpty ? "No activity data found\nDevice: \(thisDevice)" : result
     }
 }

@@ -13,9 +13,12 @@ struct TotalActivityView: View {
     
     @State private var processedApps: [AppUsageData] = []
     @State private var debugInfo: String = "Starting..."
+    @State private var deviceInfo: String = ""
+    @State private var totalTime: String = ""
     
     struct AppUsageData: Identifiable, Codable {
         let id = UUID()
+        let bundleIdentifier: String
         let name: String
         let timeString: String
         let timeInSeconds: TimeInterval
@@ -30,6 +33,18 @@ struct TotalActivityView: View {
             Text("Screen Time Report")
                 .font(.title2)
                 .bold()
+            
+            if !deviceInfo.isEmpty {
+                Text("Device: \(deviceInfo)")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+            }
+            
+            if !totalTime.isEmpty {
+                Text("Total Screen Time: \(totalTime)")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
             
             Text("Debug: \(debugInfo)")
                 .font(.caption)
@@ -48,6 +63,9 @@ struct TotalActivityView: View {
                             Text(app.name)
                                 .font(.subheadline)
                                 .bold()
+                            Text(app.bundleIdentifier)
+                                .font(.caption2)
+                                .foregroundColor(.gray)
                             Text("Usage: \(app.formattedTime)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -75,30 +93,52 @@ struct TotalActivityView: View {
     
     private func processReportData() {
         debugInfo = "Parsing activity report..."
+        print("🔍 TotalActivityView: Processing report: \(activityReport)")
         
         let lines = activityReport.split(separator: "\n")
         var apps: [AppUsageData] = []
         
         for line in lines {
-            let parts = line.split(separator: ",")
-            guard parts.count == 2 else { continue }
+            let lineString = String(line).trimmingCharacters(in: .whitespaces)
             
-            let name = String(parts[0]).trimmingCharacters(in: .whitespaces)
-            let timeString = String(parts[1])
-                .replacingOccurrences(of: "Time:", with: "")
-                .trimmingCharacters(in: .whitespaces)
+            // device info
+            if lineString.hasPrefix("Device:") {
+                deviceInfo = String(lineString.dropFirst(7))
+                continue
+            }
+            
+            // total time
+            if lineString.hasPrefix("TotalTime:") {
+                totalTime = String(lineString.dropFirst(10))
+                continue
+            }
+            
+            // app data: bundleId|appName|timeString
+            let parts = lineString.split(separator: "|")
+            guard parts.count == 3 else { 
+                print("Skipping malformed line: \(lineString)")
+                continue 
+            }
+            
+            let bundleId = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            let appName = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            let timeString = String(parts[2]).trimmingCharacters(in: .whitespaces)
             
             let timeInSeconds = parseTimeString(timeString)
             
             apps.append(AppUsageData(
-                name: name,
+                bundleIdentifier: bundleId,
+                name: appName,
                 timeString: timeString,
                 timeInSeconds: timeInSeconds
             ))
+            
+            print("Processed app: \(appName) (\(bundleId)) - \(timeString)")
         }
         
         processedApps = apps.sorted { $0.timeInSeconds > $1.timeInSeconds }
         debugInfo = "Found \(processedApps.count) apps with screen time data"
+        print("TotalActivityView: Final count: \(processedApps.count) apps")
         
         saveDataToMainApp(processedApps)
     }
@@ -121,29 +161,30 @@ struct TotalActivityView: View {
     }
     
     private func saveDataToMainApp(_ data: [AppUsageData]) {
-        guard let userDefaults = UserDefaults(suiteName: "group.savinajabbo.lockinai") else {
-            print("❌ Failed to access App Group UserDefaults")
+        guard let userDefaults = UserDefaults(suiteName: "group.savinajabbo.lockin") else {
+            print("Failed to access App Group UserDefaults")
             return
         }
         
-        let encoder = JSONEncoder()
+        // structured data for main app
+        let extensionData = data.map { app in
+            [
+                "bundleIdentifier": app.bundleIdentifier,
+                "displayName": app.name,
+                "totalTime": app.timeInSeconds,
+                "numberOfPickups": 0,
+                "firstPickupDate": Date().timeIntervalSince1970,
+                "lastPickupDate": Date().timeIntervalSince1970
+            ] as [String : Any]
+        }
+        
         do {
-            let simplified = data.map { app in
-                [
-                    "bundleIdentifier": app.name,
-                    "displayName": app.name,
-                    "totalTime": app.timeInSeconds,
-                    "numberOfPickups": 0,
-                    "firstPickupDate": Date().timeIntervalSince1970,
-                    "lastPickupDate": Date().timeIntervalSince1970
-                ]
-            }
-            let encoded = try JSONSerialization.data(withJSONObject: simplified)
-            userDefaults.set(encoded, forKey: "appUsageData")
+            let jsonData = try JSONSerialization.data(withJSONObject: extensionData)
+            userDefaults.set(jsonData, forKey: "appUsageData")
             userDefaults.set(Date(), forKey: "lastDataUpdate")
-            print("✅ Saved \(data.count) apps to App Group UserDefaults")
+            print("Saved \(data.count) apps to App Group UserDefaults")
         } catch {
-            print("❌ Failed to save data: \(error)")
+            print("Failed to save data: \(error)")
         }
     }
 }

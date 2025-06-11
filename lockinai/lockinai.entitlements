@@ -6,7 +6,7 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.savinajabbo.lockinai</string>
+		<string>group.savinajabbo.lockin</string>
 	</array>
 </dict>
 </plist>

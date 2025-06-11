@@ -26,11 +26,17 @@ class ScreenTimeManager: ObservableObject {
     private init() {}
     
     func requestAuthorization() async throws {
-        try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
-        await MainActor.run {
-            self.isAuthorized = true
+        print("Requesting Screen Time authorization...")
+        do {
+            try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+            await MainActor.run {
+                self.isAuthorized = true
+            }
+            print("Screen Time authorization granted")
+        } catch {
+            print("Failed to get Screen Time authorization: \(error)")
+            throw error
         }
-        print("Screen Time authorization granted")
     }
     
     func startMonitoring() {
@@ -50,15 +56,15 @@ class ScreenTimeManager: ObservableObject {
         do {
             try deviceActivityCenter.startMonitoring(activityName, during: schedule)
             isMonitoring = true
-            print("✅ Started monitoring device activity")
+            print("Started monitoring device activity")
         } catch {
-            print("❌ Failed to start monitoring: \(error)")
+            print("Failed to start monitoring: \(error)")
         }
     }
     
     func startReportMonitoring() {
         guard isAuthorized else {
-            print("❌ Error: Not authorized for Screen Time")
+            print("Error: Not authorized for Screen Time")
             return
         }
         
@@ -76,9 +82,9 @@ class ScreenTimeManager: ObservableObject {
         
         do {
             try deviceActivityCenter.startMonitoring(activityName, during: schedule)
-            print("✅ Started report monitoring for DeviceActivityReport")
+            print("Started report monitoring for DeviceActivityReport")
         } catch {
-            print("❌ Failed to start report monitoring: \(error)")
+            print("Failed to start report monitoring: \(error)")
         }
     }
     
@@ -91,11 +97,11 @@ class ScreenTimeManager: ObservableObject {
     
     func fetchRealUsageData() async {
         guard isAuthorized else {
-            print("❌ Error: Not authorized for Screen Time")
+            print("Error: Not authorized for Screen Time")
             return
         }
         
-        print("🔄 Starting to fetch real usage data...")
+        print("Starting to fetch real usage data...")
         
         startMonitoring()
         
@@ -113,7 +119,7 @@ class ScreenTimeManager: ObservableObject {
     }
     
     private func fetchDataDirectly() async {
-        print("🔄 Attempting direct screen time data access...")
+        print("Attempting direct screen time data access...")
         
         let calendar = Calendar.current
         let now = Date()
@@ -129,26 +135,26 @@ class ScreenTimeManager: ObservableObject {
         
         do {
             try deviceActivityCenter.startMonitoring(activityName, during: schedule)
-            print("✅ Started direct monitoring for today's data")
+            print("Started direct monitoring for today's data")
             
             try await Task.sleep(nanoseconds: 5_000_000_000) 
             
             loadUsageDataFromExtension()
             
             if !appUsageData.isEmpty {
-                print("✅ Successfully loaded real usage data!")
+                print("Successfully loaded real usage data!")
             } else {
-                print("⚠️ No real data available yet - extension may need more time")
+                print("No real data available yet - extension may need more time")
             }
             
         } catch {
-            print("❌ Failed direct monitoring: \(error)")
+            print("Failed direct monitoring: \(error)")
         }
     }
     
     private func loadUsageDataFromExtension() {
-        guard let userDefaults = UserDefaults(suiteName: "group.savinajabbo.lockinai") else {
-            print("❌ Failed to access App Group UserDefaults")
+        guard let userDefaults = UserDefaults(suiteName: "group.savinajabbo.lockin") else {
+            print("Failed to access App Group UserDefaults")
             return
         }
         
@@ -164,13 +170,13 @@ class ScreenTimeManager: ObservableObject {
                     )
                 }
                 
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.appUsageData = convertedData.sorted { $0.totalTime > $1.totalTime }
-                    print("✅ Loaded real usage data for \(convertedData.count) apps from extension")
+                    print("Loaded real usage data for \(convertedData.count) apps from extension")
                 }
             }
         } else {
-            print("⚠️  No usage data found from extension yet")
+            print("No usage data found from extension yet")
         }
     }
     
@@ -204,7 +210,7 @@ class ScreenTimeManager: ObservableObject {
         
         await MainActor.run {
             self.appUsageData = sampleData.sorted { $0.totalTime > $1.totalTime }
-            print("✅ Created sample data to demonstrate functionality")
+            print("Created sample data to demonstrate functionality")
         }
     }
     
@@ -224,12 +230,12 @@ class ScreenTimeManager: ObservableObject {
         }
         
         managedSettingsStore.shield.applications = selectedApps.applicationTokens
-        print("✅ Blocked \(selectedApps.applicationTokens.count) apps")
+        print("Blocked \(selectedApps.applicationTokens.count) apps")
     }
     
     func unblockAllApps() {
         managedSettingsStore.shield.applications = []
-        print("✅ Unblocked all apps")
+        print("Unblocked all apps")
     }
     
     func checkAuthorizationStatus() {
@@ -239,6 +245,17 @@ class ScreenTimeManager: ObservableObject {
                 self.isAuthorized = (status == .approved)
             }
             print("Authorization status: \(status)")
+            
+            switch status {
+            case .notDetermined:
+                print("Screen Time authorization not yet requested")
+            case .denied:
+                print("Screen Time authorization denied")
+            case .approved:
+                print("Screen Time authorization approved")
+            @unknown default:
+                print("Unknown authorization status")
+            }
         }
     }
     
@@ -257,19 +274,19 @@ class ScreenTimeManager: ObservableObject {
         let limitationData = [
             AppUsageInfo(
                 bundleIdentifier: "limitation.info",
-                name: "ℹ️ Screen Time Data Access",
+                name: "Screen Time Data Access",
                 totalTime: 0,
                 lastUsed: Date()
             ),
             AppUsageInfo(
                 bundleIdentifier: "limitation.apple",
-                name: "🔒 Apple restricts direct access",
+                name: "Apple restricts direct access",
                 totalTime: 0,
                 lastUsed: Date()
             ),
             AppUsageInfo(
                 bundleIdentifier: "limitation.solution",
-                name: "💡 Use 'Open Screen Time Settings'",
+                name: "Use 'Open Screen Time Settings'",
                 totalTime: 0,
                 lastUsed: Date()
             )
@@ -277,22 +294,22 @@ class ScreenTimeManager: ObservableObject {
         
         await MainActor.run {
             self.appUsageData = limitationData
-            print("ℹ️ Showing Screen Time access limitation info")
+            print("Showing Screen Time access limitation info")
         }
     }
     
     func openScreenTimeSettings() {
         guard let settingsUrl = URL(string: "App-prefs:SCREEN_TIME") else {
-            print("❌ Unable to create Screen Time settings URL")
+            print("Unable to create Screen Time settings URL")
             return
         }
         
         DispatchQueue.main.async {
             if UIApplication.shared.canOpenURL(settingsUrl) {
                 UIApplication.shared.open(settingsUrl)
-                print("✅ Opening Screen Time settings")
+                print("Opening Screen Time settings")
             } else {
-                print("❌ Cannot open Screen Time settings")
+                print("Cannot open Screen Time settings")
             }
         }
     }
