@@ -88,7 +88,15 @@ struct ContentView: View {
                             .font(.headline)
                             .padding(.horizontal)
                         
-                        DeviceActivityReport(.total)
+                        // Create hourly filter for today's data
+                        let today = Calendar.current.dateInterval(of: .day, for: Date())!
+                        let hourlyFilter = DeviceActivityFilter(
+                            segment: .hourly(during: today),
+                            users: .all,
+                            devices: .all
+                        )
+                        
+                        DeviceActivityReport(.total, filter: hourlyFilter)
                             .frame(minHeight: 250, maxHeight: 400)
                             .background(Color(.systemGray6))
                             .cornerRadius(12)

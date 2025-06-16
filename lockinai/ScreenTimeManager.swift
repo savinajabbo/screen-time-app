@@ -1,5 +1,5 @@
 import Foundation
-import ScreenTime
+import UIKit
 import FamilyControls
 import DeviceActivity
 import ManagedSettings

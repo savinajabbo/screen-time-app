@@ -8,6 +8,19 @@
 import SwiftUI
 import DeviceActivity
 
+struct AppUsageData: Identifiable, Codable {
+    let id = UUID()
+    let bundleIdentifier: String
+    let name: String
+    let timeString: String
+    let timeInSeconds: TimeInterval
+    let hour: String
+    
+    var formattedTime: String {
+        return timeString
+    }
+}
+
 struct TotalActivityView: View {
     let activityReport: String
     
@@ -16,35 +29,11 @@ struct TotalActivityView: View {
     @State private var deviceInfo: String = ""
     @State private var totalTime: String = ""
     
-    struct AppUsageData: Identifiable, Codable {
-        let id = UUID()
-        let bundleIdentifier: String
-        let name: String
-        let timeString: String
-        let timeInSeconds: TimeInterval
-        
-        var formattedTime: String {
-            return timeString
-        }
-    }
-    
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Screen Time Report")
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Today's Usage Timeline")
                 .font(.title2)
                 .bold()
-            
-            if !deviceInfo.isEmpty {
-                Text("Device: \(deviceInfo)")
-                    .font(.caption)
-                    .foregroundColor(.blue)
-            }
-            
-            if !totalTime.isEmpty {
-                Text("Total Screen Time: \(totalTime)")
-                    .font(.caption)
-                    .foregroundColor(.green)
-            }
             
             Text("Debug: \(debugInfo)")
                 .font(.caption)
@@ -54,34 +43,15 @@ struct TotalActivityView: View {
                 Text("Processing screen time data...")
                     .foregroundColor(.secondary)
             } else {
-                Text("Found \(processedApps.count) apps:")
-                    .font(.headline)
-                
-                List(processedApps) { app in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(app.name)
-                                .font(.subheadline)
-                                .bold()
-                            Text(app.bundleIdentifier)
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                            Text("Usage: \(app.formattedTime)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        
-                        if let maxUsage = processedApps.map(\.timeInSeconds).max(), maxUsage > 0 {
-                            ProgressView(value: app.timeInSeconds / maxUsage)
-                                .frame(width: 60)
-                                .accentColor(.blue)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(groupedByHour.keys.sorted(by: { parseHourForSorting($0) < parseHourForSorting($1) }), id: \.self) { hour in
+                            HourTimelineView(hour: hour, apps: groupedByHour[hour] ?? [])
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 4)
                 }
-                .listStyle(PlainListStyle())
-                .frame(maxHeight: 300)
+                .frame(maxHeight: 400)
             }
         }
         .padding()
@@ -91,6 +61,11 @@ struct TotalActivityView: View {
         }
     }
     
+    // Computed property to group apps by hour
+    private var groupedByHour: [String: [AppUsageData]] {
+        Dictionary(grouping: processedApps) { $0.hour }
+    }
+    
     private func processReportData() {
         debugInfo = "Parsing activity report..."
         print("🔍 TotalActivityView: Processing report: \(activityReport)")
@@ -98,66 +73,110 @@ struct TotalActivityView: View {
         let lines = activityReport.split(separator: "\n")
         var apps: [AppUsageData] = []
         
+        // Check if this is the new CSV format or an error message
+        if activityReport.contains("No Screen-Time data found") {
+            debugInfo = "No Screen-Time data found"
+            return
+        }
+        
         for line in lines {
             let lineString = String(line).trimmingCharacters(in: .whitespaces)
             
-            // device info
-            if lineString.hasPrefix("Device:") {
-                deviceInfo = String(lineString.dropFirst(7))
-                continue
-            }
+            // Skip empty lines
+            guard !lineString.isEmpty else { continue }
             
-            // total time
-            if lineString.hasPrefix("TotalTime:") {
-                totalTime = String(lineString.dropFirst(10))
-                continue
-            }
-            
-            // app data: bundleId|appName|timeString
+            // New CSV format: hour|bundleID|minutes
             let parts = lineString.split(separator: "|")
             guard parts.count == 3 else { 
                 print("Skipping malformed line: \(lineString)")
                 continue 
             }
             
-            let bundleId = String(parts[0]).trimmingCharacters(in: .whitespaces)
-            let appName = String(parts[1]).trimmingCharacters(in: .whitespaces)
-            let timeString = String(parts[2]).trimmingCharacters(in: .whitespaces)
+            let hour = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            let bundleId = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            let minutesString = String(parts[2]).trimmingCharacters(in: .whitespaces)
             
-            let timeInSeconds = parseTimeString(timeString)
+            // Convert minutes to seconds
+            let minutes = Double(minutesString) ?? 0
+            let timeInSeconds = minutes * 60
+            let timeString = "\(Int(minutes))m"
+            
+            // Use bundle ID as display name (we could enhance this with a lookup table)
+            let appName = bundleIdToDisplayName(bundleId)
             
             apps.append(AppUsageData(
                 bundleIdentifier: bundleId,
                 name: appName,
                 timeString: timeString,
-                timeInSeconds: timeInSeconds
+                timeInSeconds: timeInSeconds,
+                hour: hour
             ))
             
-            print("Processed app: \(appName) (\(bundleId)) - \(timeString)")
+            print("Processed app: \(appName) (\(bundleId)) at \(hour) - \(timeString)")
         }
         
-        processedApps = apps.sorted { $0.timeInSeconds > $1.timeInSeconds }
-        debugInfo = "Found \(processedApps.count) apps with screen time data"
-        print("TotalActivityView: Final count: \(processedApps.count) apps")
+        processedApps = apps.sorted { app1, app2 in
+            // First sort by hour (chronologically)
+            let hour1 = parseHourForSorting(app1.hour)
+            let hour2 = parseHourForSorting(app2.hour)
+            if hour1 != hour2 {
+                return hour1 < hour2
+            }
+            // Within the same hour, sort by usage time (most used first)
+            return app1.timeInSeconds > app2.timeInSeconds
+        }
+        debugInfo = "Found \(processedApps.count) hourly app usage entries"
+        print("TotalActivityView: Final count: \(processedApps.count) entries")
         
         saveDataToMainApp(processedApps)
     }
     
-    private func parseTimeString(_ timeString: String) -> TimeInterval {
-        var totalSeconds: TimeInterval = 0
-        let components = timeString.split(separator: " ")
+    // Helper to convert bundle ID to a more readable name
+    private func bundleIdToDisplayName(_ bundleId: String) -> String {
+        let knownApps = [
+            "com.apple.mobilesafari": "Safari",
+            "com.apple.mobilemail": "Mail",
+            "com.apple.MobileSMS": "Messages",
+            "com.apple.Music": "Music",
+            "com.apple.camera": "Camera",
+            "com.apple.Photos": "Photos",
+            "com.apple.AppStore": "App Store",
+            "com.apple.mobilephone": "Phone",
+            "com.apple.MobileAddressBook": "Contacts",
+            "com.apple.Preferences": "Settings",
+            "com.apple.calculator": "Calculator",
+            "com.apple.Maps": "Maps",
+            "com.apple.weather": "Weather",
+            "com.apple.mobilecal": "Calendar",
+            "com.apple.mobilenotes": "Notes",
+            "com.apple.reminders": "Reminders",
+            "com.apple.facetime": "FaceTime",
+            "com.apple.iBooks": "Books",
+            "com.apple.news": "News",
+            "com.apple.podcasts": "Podcasts",
+            "com.apple.tv": "Apple TV",
+            "com.apple.findmy": "Find My",
+            "com.apple.shortcuts": "Shortcuts"
+        ]
         
-        for component in components {
-            if component.hasSuffix("h"), let hours = Double(component.dropLast()) {
-                totalSeconds += hours * 3600
-            } else if component.hasSuffix("m"), let minutes = Double(component.dropLast()) {
-                totalSeconds += minutes * 60
-            } else if component.hasSuffix("s"), let seconds = Double(component.dropLast()) {
-                totalSeconds += seconds
-            }
+        return knownApps[bundleId] ?? bundleId.components(separatedBy: ".").last?.capitalized ?? bundleId
+    }
+    
+    // Helper to parse hour strings for chronological sorting
+    private func parseHourForSorting(_ hourString: String) -> Int {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        
+        if let date = formatter.date(from: hourString) {
+            let calendar = Calendar.current
+            let hour = calendar.component(.hour, from: date)
+            return hour
         }
         
-        return totalSeconds
+        // Fallback: try to extract hour number from string
+        let numbers = hourString.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+        return numbers.first ?? 0
     }
     
     private func saveDataToMainApp(_ data: [AppUsageData]) {
@@ -186,6 +205,82 @@ struct TotalActivityView: View {
         } catch {
             print("Failed to save data: \(error)")
         }
+    }
+}
+
+// New timeline view for each hour
+struct HourTimelineView: View {
+    let hour: String
+    let apps: [AppUsageData]
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Hour label (left side)
+            VStack {
+                Text(hour)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.blue)
+                    .frame(width: 60, alignment: .trailing)
+                
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 8, height: 8)
+                
+                if apps.count > 1 {
+                    Rectangle()
+                        .fill(.blue.opacity(0.3))
+                        .frame(width: 2, height: CGFloat(apps.count - 1) * 32)
+                }
+            }
+            
+            // Apps used during this hour (right side)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(apps.sorted { $0.timeInSeconds > $1.timeInSeconds }) { app in
+                    HStack {
+                        // App icon placeholder
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(colorForApp(app.bundleIdentifier))
+                            .frame(width: 24, height: 24)
+                            .overlay(
+                                Text(String(app.name.prefix(1)))
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            )
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(app.name)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Text(app.formattedTime)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+                        
+                        // Usage bar
+                        if let maxUsage = apps.map(\.timeInSeconds).max(), maxUsage > 0 {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(colorForApp(app.bundleIdentifier).opacity(0.7))
+                                .frame(width: CGFloat(app.timeInSeconds / maxUsage) * 60, height: 4)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding(.leading, 8)
+            
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
+    
+    // Generate consistent colors for apps
+    private func colorForApp(_ bundleId: String) -> Color {
+        let colors: [Color] = [.blue, .green, .orange, .purple, .red, .pink, .cyan, .mint, .indigo, .teal]
+        let hash = abs(bundleId.hashValue)
+        return colors[hash % colors.count]
     }
 }
 

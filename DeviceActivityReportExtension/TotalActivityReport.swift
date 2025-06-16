@@ -7,68 +7,73 @@
 
 import DeviceActivity
 import SwiftUI
+import OSLog
 
 extension DeviceActivityReport.Context {
     static let total = Self("TotalActivity")
 }
 
 struct TotalActivityReport: DeviceActivityReportScene {
+
     let context: DeviceActivityReport.Context = .total
-    
+    typealias Configuration = String
     let content: (String) -> TotalActivityView
-    
-    func makeConfiguration(representing data: DeviceActivityResults<DeviceActivityData>) async -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.day, .hour, .minute, .second]
-        formatter.unitsStyle = .abbreviated
-        formatter.zeroFormattingBehavior = .dropAll
 
-        let thisDevice = await UIDevice.current.model
-        print("🔍 TotalActivityReport: Processing data for device: \(thisDevice)")
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> String {
 
-        var deviceData: DeviceActivityData? = nil
+        let log = Logger(subsystem: "TotalActivity", category: "Report")
+        log.debug("⚙️ Generating TotalActivityReport")
+
+        // formatter for minutes like “12 m”
+        let minutesFmt: (TimeInterval) -> String = { secs in
+            "\(Int(secs/60))"
+        }
+        let hourLabel: (Date) -> String = { date in
+            DateFormatter.localizedString(from: date,
+                dateStyle: .none,
+                timeStyle: .short)
+        }
+
+        var usage: [Date: [String: TimeInterval]] = [:]
+
+        var deviceCount = 0, segmentCount = 0, appCount = 0
         for await device in data {
-            deviceData = device
-            break
-        }
-        
-        guard let deviceData = deviceData else {
-            print("❌ TotalActivityReport: No device data available")
-            return "No device data available\nDevice: \(thisDevice)"
-        }
-
-        print("✅ TotalActivityReport: Found device data")
-
-        let totalActivityDuration = await deviceData.activitySegments.reduce(0) { total, segment in
-            total + segment.totalActivityDuration
-        }
-
-        var appData = [String]()
-        appData.append("Device:\(thisDevice)")
-        appData.append("TotalTime:\(formatter.string(from: totalActivityDuration) ?? "0m")")
-
-        var appCount = 0
-        for await activitySegment in deviceData.activitySegments {
-            print("🔍 Processing activity segment")
-            
-            for await category in activitySegment.categories {
-                print("🔍 Processing category")
-                
-                for await app in category.applications {
-                    let bundleId = app.application.bundleIdentifier ?? "unknown.bundle.id"
-                    let appName = app.application.localizedDisplayName ?? bundleId
-                    let appTime = formatter.string(from: app.totalActivityDuration) ?? "0m"
-                    
-                    appData.append("\(bundleId)|\(appName)|\(appTime)")
-                    appCount += 1
-                    print("✅ Added app: \(appName) (\(bundleId)) - \(appTime)")
+            deviceCount += 1
+            for await segment in device.activitySegments {
+                segmentCount += 1
+                let hourStart = segment.dateInterval.start
+                for await category in segment.categories {
+                    for await app in category.applications {
+                        let id = app.application.bundleIdentifier ?? "unknown"
+                        usage[hourStart, default: [:]][id, default: 0] +=
+                            app.totalActivityDuration
+                        appCount += 1
+                    }
                 }
             }
         }
 
-        print("📊 TotalActivityReport: Processed \(appCount) apps total")
-        let result = appData.joined(separator: "\n")
-        print("🔍 TotalActivityReport: Final result: \(result)")
-        return result.isEmpty ? "No activity data found\nDevice: \(thisDevice)" : result
+        log.debug("📱 Devices: \(deviceCount), segments: \(segmentCount), apps: \(appCount)")
+
+        guard appCount > 0 else {
+            return """
+                   No Screen-Time data found.
+                   • Has the host app called AuthorizationCenter.shared.requestAuthorization(for: .individual)?
+                   • Is your DeviceActivityFilter’s applications set (tokens) non-empty?
+                   """
+        }
+
+        // CSV rows
+        var rows: [String] = []
+        for (hour, apps) in usage.sorted(by: { $0.key < $1.key }) {
+            let label = hourLabel(hour)
+            for (bundleID, secs) in apps.sorted(by: { $0.key < $1.key }) {
+                rows.append("\(label)|\(bundleID)|\(minutesFmt(secs))")
+            }
+        }
+
+        return rows.joined(separator: "\n")
     }
 }
